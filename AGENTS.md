@@ -105,3 +105,30 @@ blocks a simulation test.
 | one file | `npx vitest run tests/simulation.test.ts` |
 | everything | `npm test` |
 | types | `npm run typecheck` |
+
+Actual counts, from `vitest run`: `simulation.test.ts` 41,
+`ship_voxel.test.ts` 50, `interior.test.ts` 49, `layers.test.ts` 5,
+`app.test.ts` 12, `dev.harness.ts` 1. Total **158**.
+
+## Headless verification
+
+`npm run dev` (= `vitest run tests/dev.harness.ts`) is **not** a rendering smoke
+test. It is an assertion-free harness that drives
+`build(platform, initialState)` with a `null` renderer and prints: two seeded
+simulations advancing, the clock-overflow refusal with its state before and
+after, and the hull-mesh tally.
+
+What it proves: the pure layers and the `build` seam run with no engine, no
+canvas, no DOM, and no GPU; the simulation is deterministic; a hull meshes
+(9864 vertices, 2466 quads, 5 extras) headlessly.
+
+What it cannot prove: **nothing renders.** It does not construct a Babylon
+engine, does not produce a frame, and does not exercise `createCameras`,
+`uploadHullGeometry` or the fog. A `main.ts` change can break every pixel in the
+game and `npm run dev` will still exit 0. Anything that must be verified about
+rendering needs a real browser — do not claim it from this harness.
+
+The harness lives in `tests/` and not `src/` because Node's
+`--experimental-strip-types` cannot erase a TS `enum`, which the voxel palette
+is full of, so it must go through vitest's transform.
+

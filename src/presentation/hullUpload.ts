@@ -17,11 +17,12 @@
  *   error, caught here at the render boundary rather than in the generator.
  */
 
-import type { Mesh, Scene } from 'babylonjs';
+import { VertexBuffer } from 'babylonjs';
+import type { Mesh } from 'babylonjs';
 
 import { VOXEL_SCALE } from './constants.ts';
 import type { ExtraMesh, ShipMesh } from '../ship/voxel.ts';
-import { ExtraMeshKind, PaletteChoice, meshErrorMessage, type MeshError } from '../ship/voxel.ts';
+import { ExtraMeshKind, meshErrorMessage, type MeshError } from '../ship/voxel.ts';
 
 /** Whether a detail is translucent, and therefore needs its own material. */
 export const GLAZING_ALPHA = 0.45;
@@ -137,8 +138,6 @@ export const HULL_ATTRIBUTE_COUNT = 3;
 export function uploadHullGeometry(
   mesh: Mesh,
   hull: ShipMesh,
-  scene: Scene,
-  babylon: typeof import('babylonjs'),
 ): MeshError | null {
   if (hull.positions.length === 0) {
     return null;
@@ -147,16 +146,12 @@ export function uploadHullGeometry(
   if (!(indices instanceof Uint16Array)) {
     return indices;
   }
-  const positions = flattenPositions(hull.positions);
-  const normals = flattenPositions(hull.normals);
-  const colors = flattenColors(hull.colors);
-  mesh.setVerticesData(babylon.VertexBuffer.PositionKind, positions, false);
-  mesh.setVerticesData(babylon.VertexBuffer.NormalKind, normals, false);
-  mesh.setVerticesData(babylon.VertexBuffer.ColorKind, colors, false);
+  mesh.setVerticesData(VertexBuffer.PositionKind, flattenPositions(hull.positions), false);
+  mesh.setVerticesData(VertexBuffer.NormalKind, flattenPositions(hull.normals), false);
+  mesh.setVerticesData(VertexBuffer.ColorKind, flattenColors(hull.colors), false);
   mesh.setIndices(indices, null, true);
   mesh.isPickable = false;
   mesh.alwaysSelectAsActiveMesh = true;
-  void scene;
   return null;
 }
 
@@ -193,11 +188,6 @@ export function extrasByKind(
 /** Whether any of `extras` is the translucent glazing. */
 export function hasGlazing(extras: readonly ExtraMesh[]): boolean {
   return extras.some((extra) => extra.kind === ExtraMeshKind.CockpitGlazing);
-}
-
-/** The `[r, g, b, a]` of a livery choice, for a golden test to compare. */
-export function liveryRgba(palette: PaletteChoice): readonly [number, number, number, number] {
-  return palette === PaletteChoice.Explorer ? [1, 1, 1, 1] : [0.8, 0.9, 1, 1];
 }
 
 /** The rendering of a mesh error, for the presentation log. */

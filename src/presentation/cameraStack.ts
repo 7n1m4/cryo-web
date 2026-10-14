@@ -22,7 +22,8 @@
  * layer" is asserted in `createCameras` rather than left to convention.
  */
 
-import type { AbstractEngine, Camera, Scene } from 'babylonjs';
+import { TargetCamera, Vector3 } from 'babylonjs';
+import type { AbstractEngine, Scene } from 'babylonjs';
 
 import {
   CAMERA_FAR_EXTERIOR,
@@ -40,6 +41,23 @@ export interface LayerMasks {
   readonly exterior: number;
   /** The interior's bit. */
   readonly interior: number;
+}
+
+/**
+ * The camera stack a CRYO frame is drawn with.
+ *
+ * `TargetCamera` rather than `Camera`, so a caller that wants to aim one calls
+ * `setTarget` rather than casting: both the standing exterior camera and the
+ * walking interior camera look at something, and the cast was the only reason
+ * `Camera` was ever enough.
+ */
+export interface CameraStack {
+  /** The title-screen camera. */
+  readonly title: TargetCamera;
+  /** The exterior hull camera. */
+  readonly exterior: TargetCamera;
+  /** The interior walking camera. */
+  readonly interior: TargetCamera;
 }
 
 /**
@@ -82,14 +100,13 @@ export function engineOptions(): {
  * they are passed rather than looked up, but they are the Rust's numbers.
  */
 function makeCamera(
-  babylon: typeof import('babylonjs'),
   name: string,
   scene: Scene,
   mask: number,
   fov: number,
   far: number,
-): Camera {
-  const camera = new babylon.Camera(name, babylon.Vector3.Zero(), scene);
+): TargetCamera {
+  const camera = new TargetCamera(name, Vector3.Zero(), scene);
   camera.layerMask = mask;
   camera.minZ = CAMERA_NEAR;
   camera.maxZ = far;
@@ -108,32 +125,28 @@ function makeCamera(
  * the scene camera composite over it; it is set here so the stack is compositing
  * the moment it is built.
  */
-export function createCameras(scene: Scene, babylon: typeof import('babylonjs')): {
-  readonly title: Camera;
-  readonly exterior: Camera;
-  readonly interior: Camera;
-} {
+export function createCameras(scene: Scene): CameraStack {
   const masks = layerMasks();
-  const title = makeCamera(babylon, 'cryo.title', scene, masks.title, CAMERA_FAR_EXTERIOR, CAMERA_FAR_EXTERIOR);
-  const exterior = makeCamera(
-    babylon,
-    'cryo.exterior',
-    scene,
-    masks.exterior,
-    EXTERIOR_CAMERA_FOV,
-    CAMERA_FAR_EXTERIOR,
-  );
-  const interior = makeCamera(
-    babylon,
-    'cryo.interior',
-    scene,
-    masks.interior,
-    INTERIOR_CAMERA_FOV,
-    CAMERA_FAR_INTERIOR,
-  );
+  const cameras: CameraStack = {
+    title: makeCamera('cryo.title', scene, masks.title, CAMERA_FAR_EXTERIOR, CAMERA_FAR_EXTERIOR),
+    exterior: makeCamera(
+      'cryo.exterior',
+      scene,
+      masks.exterior,
+      EXTERIOR_CAMERA_FOV,
+      CAMERA_FAR_EXTERIOR,
+    ),
+    interior: makeCamera(
+      'cryo.interior',
+      scene,
+      masks.interior,
+      INTERIOR_CAMERA_FOV,
+      CAMERA_FAR_INTERIOR,
+    ),
+  };
 
   // Exactly one camera per mask: the Rust `single_mut` collision, asserted.
-  const masksUsed = [title.layerMask, exterior.layerMask, interior.layerMask];
+  const masksUsed = [cameras.title.layerMask, cameras.exterior.layerMask, cameras.interior.layerMask];
   if (
     masksUsed[0] === masksUsed[1] ||
     masksUsed[0] === masksUsed[2] ||
@@ -145,8 +158,8 @@ export function createCameras(scene: Scene, babylon: typeof import('babylonjs'))
 
   scene.autoClear = false;
   scene.autoClearDepthAndStencil = true;
-  scene.activeCameras = [title, exterior, interior];
-  return { title, exterior, interior };
+  scene.activeCameras = [cameras.title, cameras.exterior, cameras.interior];
+  return cameras;
 }
 
 /** Whether `engine` was built with the options the Rust contract requires. */
