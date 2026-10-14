@@ -1,7 +1,7 @@
 {
   "name": "cryo-web",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "CRYO — a TypeScript + Babylon.js rewrite of the Rust/Bevy original",
   "type": "module",
   "scripts": {

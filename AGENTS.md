@@ -132,3 +132,9 @@ The harness lives in `tests/` and not `src/` because Node's
 `--experimental-strip-types` cannot erase a TS `enum`, which the voxel palette
 is full of, so it must go through vitest's transform.
 
+## License
+
+Everything here is MIT (see `LICENSE`). Do not add a file that carries a
+different license header: a new file is MIT by default.
+
+

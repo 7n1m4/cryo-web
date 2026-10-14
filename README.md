@@ -109,3 +109,8 @@ verified by any test in this repo.
 two seeded simulations advancing, the clock-overflow refusal with its
 before-and-after state, and the hull-mesh tally. **It never constructs a Babylon
 engine and never renders.** See `AGENTS.md`.
+
+## License
+
+MIT. See `LICENSE`.
+
