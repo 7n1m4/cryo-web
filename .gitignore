@@ -7,3 +7,5 @@ dist/
 
 # generated golden fixtures
 tests/fixtures/generated/
+
+# the harness runs through vitest, so it is a test, not a fixture

@@ -7,7 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dev": "node --experimental-strip-types src/dev.ts"
+    "dev": "vitest run tests/dev.harness.ts"
   },
   "dependencies": {
     "babylonjs": "^8.56.2"
