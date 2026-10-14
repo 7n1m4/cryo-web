@@ -33,6 +33,17 @@ export const FOG_START_HULLS = 1.5;
 /** Fog is fully opaque at 6.0 hull lengths from the camera. */
 export const FOG_END_HULLS = 6.0;
 
+/**
+ * The fog's `(start, end)` pair for a hull, in world units.
+ *
+ * Both ends are multiples of the hull's length, so a longer ship fogs further
+ * out and the fog never eats a short hull. The denominator is the same for
+ * both, which is what keeps the band a band rather than two unrelated numbers.
+ */
+export function fogBand(hullLength: number): [number, number] {
+  return [FOG_START_HULLS * hullLength, FOG_END_HULLS * hullLength];
+}
+
 /** Vertical field of view of the exterior camera, in radians. */
 export const EXTERIOR_CAMERA_FOV = Math.PI / 4.5;
 

@@ -167,6 +167,34 @@ export function hullCentre(
   };
 }
 
+/**
+ * The nose-to-tail length of an already-flattened hull, in world units.
+ *
+ * Measured from the mesh rather than the plan because the mesh is what the fog
+ * bands against: the camera sees geometry, not a table, and a hull whose
+ * engine housings push past its tail must fog around the housings.
+ */
+export function hullLength(hull: ShipMesh): number {
+  let low = Number.POSITIVE_INFINITY;
+  let high = Number.NEGATIVE_INFINITY;
+  for (const position of hull.positions) {
+    const z = position[2];
+    if (z === undefined) {
+      continue;
+    }
+    if (z < low) {
+      low = z;
+    }
+    if (z > high) {
+      high = z;
+    }
+  }
+  if (!Number.isFinite(low) || !Number.isFinite(high)) {
+    return 0;
+  }
+  return (high - low + 1) * VOXEL_SCALE;
+}
+
 /** How many non-voxel details a hull carries, by kind. */
 export const EXTRA_KIND_COUNT = 3;
 

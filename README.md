@@ -67,16 +67,17 @@ type-checked and called from typed call sites; none of it has produced pixels.
 | module | what it does | what it does NOT do |
 |---|---|---|
 | `constants.ts` | every number the render layer owns: voxel scale, fog band and colour, camera near/far/fov, orbit and look clamps, eye height, spawn cell | — |
-| `cameraStack.ts` | `createCameras(scene)` builds three `TargetCamera`s with distinct `layerMask` bits (1/2/4), sets `scene.autoClear = false` so the title camera clears and the rest composite, and **asserts the three masks are distinct** — the Rust `single_mut` collision, made loud instead of silent. | Does not create an engine, does not render, and does not wire the fog (that is `main.ts`). `engineMatchesContract` reads Babylon's `getCaps()` and is called by nothing yet. |
-| `hullUpload.ts` | flattens the mesher's positions/normals (scaled by `VOXEL_SCALE`) and 4-component colours into the `Float32Array`s a Babylon mesh uploads, converts indices to `Uint16Array` and returns the typed `TooManyVertices` error when they will not fit, and uploads via `setVerticesData`/`setIndices`. | Does not create the `Mesh` itself, does not build materials (so **no material with `alpha = 0.45` for glazing, and no `backFaceCulling` setting, exists yet**), and does not add the extras (canopy, engine glow, pads) to the scene. |
+| `cameraStack.ts` | `createCameras(scene)` builds three `TargetCamera`s with distinct `layerMask` bits (1/2/4), sets `scene.autoClear = false` so the title camera clears and the rest composite, and **asserts the three masks are distinct** — the Rust `single_mut` collision, made loud instead of silent. | Does not create an engine, does not render, does not wire the fog (that is `main.ts`). `engineMatchesContract` reads Babylon's `getCaps()` and is called by nothing yet. |
+| `hullUpload.ts` | flattens the mesher's positions/normals (scaled by `VOXEL_SCALE`) and 4-component colours into the `Float32Array`s a Babylon mesh uploads, converts indices to `Uint16Array` and returns the typed `TooManyVertices` error when they will not fit, uploads via `setVerticesData`/`setIndices`, and measures `hullLength` from the uploaded geometry. | Does not create the `Mesh` itself, does not build materials (so **no material with `alpha = 0.45` for glazing, and no `backFaceCulling` setting, exists yet**), and does not add the extras (canopy, engine glow, pads) to the scene. |
 | `hud.ts` | `formatHudStatus` renders the `t{n} · {activity} · suit {n}%` line; `setHudText`/`setTitleVisible` write to the DOM, both no-ops when `document` is undefined. | A **DOM overlay**, not `babylonjs-gui`. Does not update per frame yet — `main.ts` writes it once at startup. |
 | `input.ts` / `inputTypes.ts` | `InputTracker` records held keys and edges a key to exactly one frame; `frameWantsStart` and `walkFrame` turn that into intent. | Not wired to any real keyboard listener yet — no DOM event handlers exist, so nothing is actually reachable in the browser. |
 | `orbit.ts` / `player.ts` | **do not exist.** | The ship orbit camera, first-person walk/look, pointer lock, boarding, and the interior mesh are not written at all. |
 
 `src/main.ts` is the one file that touches a canvas. It builds the engine with
 `antialias: false`, composes the camera stack, uploads the hull mesh, sets the
-exterior fog, and runs the render loop. It is deliberately **not tested**: it
-needs a canvas, and none of its work is verified by any test in this repo.
+exterior fog from the uploaded hull's own length, and runs the render loop. It
+is deliberately **not tested**: it needs a canvas, and none of its work is
+verified by any test in this repo.
 
 ## What is NOT ported yet
 
@@ -89,8 +90,10 @@ needs a canvas, and none of its work is verified by any test in this repo.
   and counted by tests, but never added to the scene.
 - The HUD is written once at startup rather than updated per frame, and no key or
   pointer listener is registered, so the browser build shows a static frame.
-- Fog is a literal `1.5`/`6.0` in `main.ts` rather than the `fogBand()` function
-  from `constants.ts`.
+- Fog is wired: `main.ts` calls `fogBand(hullLength(mesh))` and gets the band
+  from the hull it actually uploaded. It is set only on the scene, not on the
+  interior camera separately, so **the interior camera currently sees the
+  exterior's fog** — the Rust keeps the interior clean.
 - No mouse-look, no pointer lock, no sprint, no console inspection prompt.
 - `src/ship/interior.ts` has no `nearestConsoleInView` tie-break test against a
   constructed two-console equidistance fixture — the distance-zero and

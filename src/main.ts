@@ -16,8 +16,8 @@ import { Color3, Engine, Mesh, Scene, Vector3 } from 'babylonjs';
 
 import { build } from './app.ts';
 import { createCameras, engineOptions } from './presentation/cameraStack.ts';
-import { uploadHullGeometry } from './presentation/hullUpload.ts';
-import { FOG_COLOR_LINEAR } from './presentation/constants.ts';
+import { hullLength, uploadHullGeometry } from './presentation/hullUpload.ts';
+import { FOG_COLOR_LINEAR, fogBand } from './presentation/constants.ts';
 
 /** The canvas this entry point owns. */
 function findCanvas(): HTMLCanvasElement {
@@ -69,9 +69,10 @@ export function start(): Engine {
   // The exterior fog, and only the exterior: the interior camera sees through
   // a separate fog setting because the interior is 36 metres and a fog tuned to
   // a 5-metre hull would eat it.
+  const fog = fogBand(hullLength(app.hullMesh));
   scene.fogMode = Scene.FOGMODE_LINEAR;
-  scene.fogStart = 1.5;
-  scene.fogEnd = 6.0;
+  scene.fogStart = fog[0];
+  scene.fogEnd = fog[1];
   scene.fogColor = new Color3(
     FOG_COLOR_LINEAR[0],
     FOG_COLOR_LINEAR[1],
