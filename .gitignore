@@ -1,0 +1,9 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# generated golden fixtures
+tests/fixtures/generated/

@@ -1,0 +1,21 @@
+{
+  "name": "cryo-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CRYO — a TypeScript + Babylon.js rewrite of the Rust/Bevy original",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --experimental-strip-types src/dev.ts"
+  },
+  "dependencies": {
+    "babylonjs": "^8.56.2"
+  },
+  "devDependencies": {
+    "@types/babylonjs": "^2.4.5",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

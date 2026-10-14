@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CRYO</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #05070d;
+      }
+      #cryo-hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #cfe3ff;
+        text-shadow: 0 0 6px #000;
+      }
+      #cryo-hud .state {
+        position: absolute;
+        top: 12px;
+        left: 14px;
+      }
+      #cryo-hud .title {
+        position: absolute;
+        top: 40%;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 42px;
+        letter-spacing: 0.4em;
+      }
+      #cryo-hud .prompt {
+        position: absolute;
+        top: calc(40% + 56px);
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 12px;
+        letter-spacing: 0.3em;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="cryo-hud">
+      <div class="state" id="cryo-state">t0 · resting · suit 100%</div>
+      <div class="title">CRYO</div>
+      <div class="prompt">Press any key to begin the survey</div>
+    </div>
+    <script type="module" src="./src/dev.ts"></script>
+  </body>
+</html>
