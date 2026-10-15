@@ -1058,6 +1058,321 @@ export function integrateMovement(
   return result;
 }
 
+/**
+ * Which surface of the hull's shell a [`Slab`] is part of.
+ *
+ * Port of `SlabKind` (interior_scene.rs:2085-2097).
+ */
+export type SlabKind = 'floor' | 'ceiling' | 'wall';
+
+/**
+ * One face of one room, as a slab: zero-thickness on its normal axis for
+ * collision, one cell thick for rendering.
+ *
+ * Port of `Slab` (interior_scene.rs:2038-2078). The two derivations — the mesh
+ * and the collision plane — come from one list, because two functions
+ * computing "where the walls are" can disagree about where a doorway is.
+ */
+export interface Slab {
+ /** The axis this slab's surface is normal to. */
+ readonly axis: 0 | 1 | 2;
+ /** The coordinate the slab's surface sits at, on `axis`. */
+ readonly plane: number;
+ /** The first in-face axis, the one the rect's `[0]`/`[2]` run on. */
+ readonly u: 0 | 1 | 2;
+ /** The second in-face axis, the one the rect's `[1]`/`[3]` run on. */
+ readonly v: 0 | 1 | 2;
+ /** `(u_min, v_min, u_max, v_max)`, in cells, the surface's full extent. */
+ readonly rect: readonly [number, number, number, number];
+ /** How far the rendered slab runs from the plane, and which way. */
+ readonly thickness: number;
+ /** Which surface of the hull's shell this slab is part of. */
+ readonly kind: SlabKind;
+}
+
+/** Every cell a slab is thick, so a rendered wall is one lattice cell deep. */
+const SLAB_THICKNESS = 1;
+
+/** One opening cut out of a wall, as `(room, low_side, axis, rect)`. */
+type PortalHole = {
+ readonly room: string;
+ readonly lowSide: boolean;
+ readonly axis: 0 | 1 | 2;
+ readonly rect: readonly [number, number, number, number];
+};
+
+/** A box, as the `[low, high]` corner pair the collision code takes. */
+type Box = readonly [readonly [number, number, number], readonly [number, number, number]];
+
+/**
+ * The interior's slabs: every face of every room, carved by the doorways in it.
+ *
+ * This is the single derivation the geometry and the collision both come from.
+ * The spawned meshes are `interiorSlabs` rendered, and [`walkableWalls`] is the
+ * same list with each slab's thickness collapsed onto its own surface.
+ *
+ * For the shipped `crashedShip` it returns 38 slabs: the cockpit contributes 7,
+ * the cabin 8, the corridor 8, engineering 8 and the airlock 7. The airlock is
+ * one short because its hatch is left sealed. A face carved by one doorway
+ * yields four slabs at most, so a count that is not `38 = 5 × 6 + 8` means a
+ * carve has stopped cutting what it should.
+ *
+ * Port of `interior_slabs` (interior_scene.rs:2178-2213).
+ */
+export function interiorSlabs(plan: InteriorPlan): readonly Slab[] {
+ const holes = portalHoles(plan);
+ const pieces: Slab[] = [];
+
+ for (const room of plan.rooms) {
+  for (const face of FACES) {
+   const rect = face.rect(room);
+   const holesHere = holesOn(holes, room.name, face.lowSide, face.axis);
+   let carved = [rect];
+   for (const hole of holesHere) {
+    // Each hole cuts every surviving piece, so a face with more than one
+    // doorway in it comes out as more than four pieces.
+    carved = carved.flatMap((piece) => carveRect(piece, hole));
+   }
+   const [u, v] = openingAxes(face.axis);
+   for (const piece of carved) {
+    pieces.push({
+     kind: face.axis === 1 ? (face.lowSide ? 'floor' : 'ceiling') : 'wall',
+     axis: face.axis,
+     plane: face.plane(room),
+     u,
+     v,
+     rect: piece,
+     thickness: face.thickness(),
+    });
+   }
+  }
+ }
+
+ return pieces;
+}
+
+/**
+ * The interior's wall planes, as `(min, max)` boxes collapsed onto their own
+ * surface.
+ *
+ * Port of `walkable_walls` (interior_scene.rs:772-778). Each box is
+ * zero-thickness on exactly one axis — the normal of the slab it came from —
+ * which is what turns the renderable geometry into the planes the walker's
+ * sweep test collides against.
+ */
+export function walkableWalls(plan: InteriorPlan): readonly Box[] {
+ return interiorSlabs(plan).map((slab) => slabBounds(slab, true));
+}
+
+/**
+ * A slab's box.
+ *
+ * `collapse` zeroes the thickness, which turns the rendered slab into the
+ * collision plane it is derived from.
+ *
+ * Port of `Slab::bounds` (interior_scene.rs:2066-2078).
+ */
+function slabBounds(slab: Slab, collapse: boolean): Box {
+ const min: [number, number, number] = [0, 0, 0];
+ const max: [number, number, number] = [0, 0, 0];
+ min[slab.u] = slab.rect[0];
+ max[slab.u] = slab.rect[2];
+ min[slab.v] = slab.rect[1];
+ max[slab.v] = slab.rect[3];
+ if (collapse) {
+  min[slab.axis] = slab.plane;
+  max[slab.axis] = slab.plane;
+ } else {
+  const far = slab.plane + slab.thickness;
+  min[slab.axis] = Math.min(slab.plane, far);
+  max[slab.axis] = Math.max(slab.plane, far);
+ }
+ return [min, max];
+}
+
+/** One of a room's six faces: which axis, and which side of it. */
+type RoomFace = {
+ readonly axis: 0 | 1 | 2;
+ readonly lowSide: boolean;
+ /** Where this face's collision plane sits, in world units. */
+ readonly plane: (room: Room) => number;
+ /** The face's full extent, as `(u_lo, v_lo, u_hi, v_hi)` in world units. */
+ readonly rect: (room: Room) => readonly [number, number, number, number];
+ /** How far the rendered slab runs from the plane, and which way. */
+ readonly thickness: () => number;
+};
+
+/**
+ * The interior's six faces, in a fixed order: port, starboard, deck, overhead,
+ * forward, aft.
+ *
+ * The order a room's own wall boxes are written in, so the piece list this
+ * produces can be read against that one.
+ *
+ * The x and z faces differ from the y faces, and the difference is the whole
+ * reason the planes are not simply the room's own box:
+ *
+ * - On x and z the boundary cell is solid material *inside* the room's own box,
+ *   so the plane is that cell's inner face: `min + 1` on the low side and `max`
+ *   on the high side. A player's centre is then kept between the two, which is
+ *   exactly the band the plan calls walkable.
+ * - On y the hull's skin is the boundary, and the player walks *between* the
+ *   skin's outer faces, so the plane is the room's own face: `min[1]` and
+ *   `max[1]`.
+ *
+ * Port of `FACES` and `RoomFace` (interior_scene.rs:2099-2162).
+ */
+const FACES: readonly RoomFace[] = [
+ roomFace(0, true),
+ roomFace(0, false),
+ roomFace(1, true),
+ roomFace(1, false),
+ roomFace(2, true),
+ roomFace(2, false),
+];
+
+/** Builds the one face at `axis`/`lowSide` with the Rust's own three formulas. */
+function roomFace(axis: 0 | 1 | 2, lowSide: boolean): RoomFace {
+ return {
+  axis,
+  lowSide,
+  plane: (room: Room): number => {
+   if (lowSide) {
+    if (axis === 1) {
+     return room.min[1];
+    }
+    return room.min[axis] + 1;
+   }
+   return room.max[axis];
+  },
+  rect: (room: Room): readonly [number, number, number, number] => {
+   const [u, v] = openingAxes(axis);
+   return [room.min[u], room.min[v], room.max[u] + 1, room.max[v] + 1];
+  },
+  thickness: (): number => (lowSide ? -SLAB_THICKNESS : SLAB_THICKNESS),
+ };
+}
+
+/**
+ * The openings the plan's interior doorways cut.
+ *
+ * Both faces that share the seam are carved, so the doorway is a hole rather
+ * than a half-doorway. The seam is the one axis on which one room's boundary
+ * meets the other's; only x and z can form one, because rooms in this plan
+ * never stack vertically.
+ *
+ * Port of `portal_holes` (interior_scene.rs:2226-2261).
+ */
+function portalHoles(plan: InteriorPlan): readonly PortalHole[] {
+ const holes: PortalHole[] = [];
+
+ for (const portal of plan.portals) {
+  if (portal.from === EXTERIOR_NAME || portal.to === EXTERIOR_NAME) {
+   continue;
+  }
+  const a = plan.rooms.find((room) => room.name === portal.from);
+  const b = plan.rooms.find((room) => room.name === portal.to);
+  if (a === undefined || b === undefined) {
+   continue;
+  }
+  const hole = portal.opening;
+  const rect: readonly [number, number, number, number] = [
+   hole[0],
+   hole[1],
+   hole[2] + 1,
+   hole[3] + 1,
+  ];
+
+  // The Rust pushes `(room, low_side = false, ...)` then `(room, low_side =
+  // true, ...)`: the seam is the *high* face of the room on the low side, and
+  // the *low* face of the room on the high side — which is where the two
+  // rooms' own wall planes actually meet.
+  const seam = (high: Room, low: Room, axis: 0 | 2): void => {
+   holes.push({ room: high.name, lowSide: false, axis, rect });
+   holes.push({ room: low.name, lowSide: true, axis, rect });
+  };
+
+  if (a.max[0] + 1 === b.min[0]) {
+   seam(a, b, 0);
+  }
+  if (b.max[0] + 1 === a.min[0]) {
+   seam(b, a, 0);
+  }
+  if (a.max[2] + 1 === b.min[2]) {
+   seam(a, b, 2);
+  }
+  if (b.max[2] + 1 === a.min[2]) {
+   seam(b, a, 2);
+  }
+ }
+
+ return holes;
+}
+
+/** Which of the openings cut this room's this face. */
+function holesOn(
+ holes: readonly PortalHole[],
+ room: string,
+ lowSide: boolean,
+ axis: 0 | 1 | 2,
+): readonly (readonly [number, number, number, number])[] {
+ return holes
+  .filter((hole) => hole.room === room && hole.lowSide === lowSide && hole.axis === axis)
+  .map((hole) => hole.rect);
+}
+
+/**
+ * Cuts `hole` out of `face`, returning the surviving sub-rectangles.
+ *
+ * A rectangular hole in a rectangular face leaves at most four pieces: a strip
+ * on either side of it, and a strip above and below it. Fewer when the hole
+ * reaches an edge.
+ *
+ * The hole is clamped into the face before it is cut, so a doorway that runs
+ * past the edge of the wall it is named in cannot produce a rectangle reaching
+ * outside it. Every strip is emitted only when it is non-empty on *both* axes:
+ * a zero-area box would be a collision plane that blocks nothing and a
+ * rendering slab nobody can see.
+ *
+ * Port of `carve` (interior_scene.rs:2295-2330).
+ */
+function carveRect(
+ face: readonly [number, number, number, number],
+ hole: readonly [number, number, number, number],
+): readonly (readonly [number, number, number, number])[] {
+ const [fu0, fv0, fu1, fv1] = face;
+ const [hu0, hv0, hu1, hv1] = hole;
+
+ const cu0 = Math.max(hu0, fu0);
+ const cu1 = Math.min(hu1, fu1);
+ const cv0 = Math.max(hv0, fv0);
+ const cv1 = Math.min(hv1, fv1);
+
+ if (cu1 <= cu0 || cv1 <= cv0) {
+  // The doorway does not reach this face, so the face survives whole.
+  return [face];
+ }
+
+ const pieces: (readonly [number, number, number, number])[] = [];
+ for (const [u0, u1] of [
+  [fu0, cu0],
+  [cu1, fu1],
+ ] as const) {
+  if (u1 > u0) {
+   pieces.push([u0, fv0, u1, fv1]);
+  }
+ }
+ for (const [v0, v1] of [
+  [fv0, cv0],
+  [cv1, fv1],
+ ] as const) {
+  if (v1 > v0) {
+   pieces.push([cu0, v0, cu1, v1]);
+  }
+ }
+ return pieces;
+}
+
 export {
   roomContains,
   isInteriorSpace,

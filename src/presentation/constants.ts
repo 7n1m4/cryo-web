@@ -41,7 +41,7 @@ export const FOG_END_HULLS = 6.0;
  * both, which is what keeps the band a band rather than two unrelated numbers.
  */
 export function fogBand(hullLength: number): [number, number] {
-  return [FOG_START_HULLS * hullLength, FOG_END_HULLS * hullLength];
+ return [FOG_START_HULLS * hullLength, FOG_END_HULLS * hullLength];
 }
 
 /** Vertical field of view of the exterior camera, in radians. */
@@ -102,5 +102,9 @@ export const EYE_HEIGHT = 0.65;
 /** The interior cell the player starts in. */
 export const PLAYER_SPAWN_CELL: readonly [number, number, number] = [2, 1, 3];
 
-/** How close the player must be to the hatch to board, in world units. */
-export const BOARDING_RANGE = 0.6;
+/**
+ * `BOARDING_RANGE` is deliberately absent here: it is the game layer's, because
+ * the game layer owns the boarding trigger — `src/game/sceneView.ts` holds it,
+ * and its doc carries the Rust reference. `constants.ts` holds the numbers a
+ * *renderer* needs, and this one is not one.
+ */

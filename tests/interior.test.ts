@@ -31,6 +31,8 @@ import {
   findRoom,
   inAirlock,
   interiorLayoutErrorMessage,
+  interiorSlabs,
+  walkableWalls,
   isWalkable,
   nearestConsoleInView,
   ownerOf,
@@ -774,5 +776,127 @@ describe('validate: check order is part of the contract', () => {
       const error = validate(mutate());
       expect(error?.kind, `${name} check fires`).toBe(expected);
     }
+  });
+});
+describe('interiorSlabs: the geometry and the collision come from one list', () => {
+  it('the shipped plan carves into exactly 38 slabs', () => {
+    // The count the Rust's own doc comment names (interior_scene.rs:2169-2177):
+    // five rooms × six faces = 30, and eight extra pieces from the four doorway
+    // carves, which each split one wall into three.
+    expect(interiorSlabs(plan()).length).toBe(38);
+  });
+
+  it('a doorway leaves a hole rather than a wall', () => {
+    // The seam between the cockpit and the cabin is the bulkhead at x = 5/6, and
+    // the doorway's opening is z = 4..6. The cockpit's forward face is pierced
+    // by it and comes out as two slabs whose union is the wall minus that
+    // doorway. A wall that stayed whole where a doorway is would trap the player
+    // on the cockpit side of it.
+    const ship = plan();
+    const cockpit = ship.rooms.find((room) => room.name === 'Cockpit');
+    expect(cockpit).toBeDefined();
+    if (cockpit === undefined) {
+      return;
+    }
+    const forward = interiorSlabs(ship).filter(
+      (slab) => slab.kind === 'wall' && slab.axis === 0 && slab.plane === cockpit.max[0],
+    );
+    // `u` is y and `v` is z on an x-normal slab, so `[1]`/`[3]` are the z extent.
+    expect(forward.length).toBe(2);
+    // The two pieces sit either side of the doorway: one below z = 4, one above.
+    expect(forward.map((slab) => [slab.rect[1], slab.rect[3]] as const).sort()).toEqual([
+      [0, 4],
+      [7, 9],
+    ]);
+    // Neither surviving piece spans the doorway's z: that is what makes the
+    // doorway passable rather than a painted-on arch.
+    expect(forward.some((slab) => slab.rect[1] === 4 && slab.rect[3] === 7)).toBe(false);
+  });
+
+  it('the sealed hatch is left solid', () => {
+    // The airlock's hatch is the boundary with the exterior and is not a doorway
+    // between two interior rooms, so no hole is cut for it: a player cannot walk
+    // out through the hull. `portal_holes` (interior_scene.rs:2226-2261) skips
+    // exterior portals outright.
+    const ship = plan();
+    const airlock = ship.rooms.find((room) => room.name === AIRLOCK_NAME);
+    expect(airlock).toBeDefined();
+    if (airlock === undefined) {
+      return;
+    }
+    // The airlock's own aft wall, at the far end of the hull: the hatch is in the
+    // cabin-facing face instead, and this face is the one with nothing behind it.
+    const aftWalls = interiorSlabs(ship).filter(
+      (slab) => slab.kind === 'wall' && slab.axis === 2 && slab.plane === airlock.max[2],
+    );
+    // One slab, spanning the room's full in-face extent: the hatch is not carved.
+    expect(aftWalls.length).toBe(1);
+    expect(aftWalls[0]?.rect[0]).toBe(airlock.min[0]);
+    expect(aftWalls[0]?.rect[2]).toBe(airlock.max[0] + 1);
+  });
+
+  it('walkable walls are the same list collapsed onto each surface', () => {
+    const slabs = interiorSlabs(plan());
+    const walls = walkableWalls(plan());
+    expect(walls.length).toBe(slabs.length);
+    for (const [index, wall] of walls.entries()) {
+      const slab = slabs[index];
+      expect(slab).toBeDefined();
+      if (slab === undefined) {
+        return;
+      }
+      // Zero-thickness on the normal axis: a plane, not a box.
+      expect(wall[0][slab.axis]).toBe(slab.plane);
+      expect(wall[1][slab.axis]).toBe(slab.plane);
+      // And full extent on the other two, or it would block nothing.
+      expect(wall[0][slab.u]).toBe(slab.rect[0]);
+      expect(wall[1][slab.u]).toBe(slab.rect[2]);
+      expect(wall[0][slab.v]).toBe(slab.rect[1]);
+      expect(wall[1][slab.v]).toBe(slab.rect[3]);
+    }
+  });
+
+  it('every walkable plane is degenerate on exactly one axis', () => {
+    // The point of collapsing the thickness: the sweep test is a *plane*, so a
+    // wall that were still a box would present a leading face the plan never drew
+    // and stop the player short of the wall it stands for.
+    for (const [low, high] of walkableWalls(plan())) {
+      const degenerate = [0, 1, 2].filter((axis) => low[axis as 0 | 1 | 2] === high[axis as 0 | 1 | 2]);
+      expect(degenerate.length).toBe(1);
+    }
+  });
+
+  it('a body walked at a wall is stopped by one', () => {
+    // The whole reason the derivation exists, asserted the way the game uses it:
+    // spawn a body just inside the cockpit's port wall and walk it into that wall
+    // for a second, and the collision must leave the centre on the walkable side
+    // of the plane rather than letting it through. A walker given no walls would
+    // walk straight out of the hull.
+    const ship = plan();
+    const walls = walkableWalls(ship);
+    const cockpit = ship.rooms.find((room) => room.name === 'Cockpit');
+    expect(cockpit).toBeDefined();
+    if (cockpit === undefined) {
+      return;
+    }
+    // Walk towards -x, into the port wall's plane at x = 1.
+    const origin: readonly [number, number, number] = [
+      cockpit.min[0] + 1.5,
+      PLAYER_HALF_EXTENTS[1] + COLLISION_SKIN,
+      (cockpit.min[2] + cockpit.max[2] + 1) / 2,
+    ];
+    let position = origin;
+    let velocity: readonly [number, number, number] = [0, 0, 0];
+    const dt = 1 / 60;
+    for (let frame = 0; frame < 60; frame += 1) {
+      velocity = integrateMovement(velocity, [-WALK_SPEED, 0, 0], false, dt);
+      const resolved = resolveCollision(position, [velocity[0] * dt, 0, 0], velocity, walls);
+      position = resolved.position;
+      velocity = resolved.velocity;
+    }
+    // Stopped on the walkable side of the plane: at or inside x = 1, not past it.
+    expect(position[0]).toBeGreaterThanOrEqual(cockpit.min[0] + 1 - 1e-6);
+    // And it did travel to reach the wall rather than never having moved.
+    expect(position[0]).toBeLessThan(origin[0]);
   });
 });
