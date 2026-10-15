@@ -12,6 +12,30 @@ npm run typecheck # tsc --noEmit, strict
 npm run dev       # the headless smoke harness
 ```
 
+### Scripts the game needs (not yet in `package.json`)
+
+`vite.config.ts` is in place, so the app can now be served and built — but the
+`package.json` scripts for it are missing and must be added by whoever owns that
+file:
+
+```json
+"scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "preview": "vite preview"
+}
+```
+
+`npm run dev` is currently taken by the headless smoke harness above; the harness
+owner and the bundler owner need to agree which name wins. Until then:
+
+- serve the app: `npx vite`
+- produce a build: `npx vite build`
+- serve the built output: `npx vite preview`
+
+`vite.config.ts` sets `base: './'`, so the built `dist/index.html` opens both
+from a server and from disk.
+
 ## Architecture in a few lines
 
 ```
