@@ -103,6 +103,27 @@ export const EYE_HEIGHT = 0.65;
 export const PLAYER_SPAWN_CELL: readonly [number, number, number] = [2, 1, 3];
 
 /**
+ * The longest a single frame may claim to be, in seconds.
+ *
+ * This is Bevy's `Time<Virtual>::max_delta` default, which is 250 ms and not a
+ * number this port invented. Bevy does not clamp because a frame never takes
+ * that long; it clamps because it does. Alt-tabbing away leaves the render loop
+ * stopped with nothing to reset it, and when the window comes back the engine
+ * hands the frame loop a real `performance.now()` gap of however long the
+ * player was gone.
+ *
+ * Clamping beats resetting the clock. A reset — remembering the last frame's
+ * time and skipping the gap — throws the elapsed time away and makes the
+ * walker's own integration forget the part of the gap it had already consumed,
+ * which is a second source of truth for time. A clamp keeps one monotone
+ * accumulator behind the scenes: virtual time falls permanently behind the
+ * wall clock, the frames keep coming at their real rate, and the next real
+ * frames catch up at their own pace. That is the whole of Bevy's `max_delta`,
+ * and it is the only thing a raw `performance.now()` delta needs.
+ */
+export const MAX_FRAME_SECONDS = 0.25;
+
+/**
  * `BOARDING_RANGE` is deliberately absent here: it is the game layer's, because
  * the game layer owns the boarding trigger — `src/game/sceneView.ts` holds it,
  * and its doc carries the Rust reference. `constants.ts` holds the numbers a

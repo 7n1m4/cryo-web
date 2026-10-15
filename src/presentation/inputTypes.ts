@@ -50,6 +50,33 @@ export class InputTracker {
     this.rebuildHeld();
   }
 
+  /**
+   * Forgets every key, as Bevy's `ButtonInput::reset_all` does on
+   * `KeyboardFocusLost`.
+   *
+   * A browser window fires no `keyup` for the keys held down when focus moves
+   * away — not on blur, not on the tab switch, not on the OS taking the window
+   * over. The `down` record, the just-pressed edge list and the derived held
+   * set would keep those keys in them forever, and the interior walker would
+   * keep walking when the player came back with nothing held. Bevy answers
+   * this with `KeyboardFocusLost` releasing every button that was not reported
+   * up; this is that answer, at the one place the keys are actually recorded.
+   *
+   * Every one of the three is cleared, because a key left in the pressed list
+   * would fire a second action when the player returned and a key left in the
+   * held set would keep the walker walking. There is deliberately no inverse:
+   * nothing is *pressed* on focus, because nothing was pressed on focus.
+   */
+  releaseAll(): void {
+    for (const code of Object.keys(this.pressed)) {
+      delete this.pressed[code];
+    }
+    for (const code of Object.keys(this.down)) {
+      delete this.down[code];
+    }
+    this.heldKeys.length = 0;
+  }
+
   /** The keys that went down this frame. */
   frame(): InputFrame {
     return { pressed: Object.keys(this.pressed) };

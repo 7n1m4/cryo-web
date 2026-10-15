@@ -24,8 +24,10 @@ import type { FrameInput, GameFlow } from '../src/game/step.ts';
 import { advancesSimulation, GAME_STATES, GAME_STATE_HANDLERS, stateLabel } from '../src/game/state.ts';
 import type { GameState } from '../src/game/state.ts';
 import { TRANSITIONS, resolveTransition, START_KEYS } from '../src/game/transitions.ts';
-import { crashedShip, inAirlock } from '../src/ship/interior.ts';
+import { crashedShip, inAirlock, WALK_SPEED } from '../src/ship/interior.ts';
 import type { InteriorPlan } from '../src/ship/interior.ts';
+import { Seed, Simulation } from '../src/sim/simulation.ts';
+import { MAX_FRAME_SECONDS } from '../src/presentation/constants.ts';
 import { HullPlan } from '../src/ship/voxel.ts';
 import { OPENING_HULL_CONFIG } from '../src/presentation/frameMath.ts';
 import type { ShipOrbit } from '../src/presentation/orbit.ts';
@@ -35,7 +37,16 @@ import {
  orbitNearestTo,
  orbitPosition,
 } from '../src/presentation/orbit.ts';
-import { boardingStation, hatchDirection } from '../src/presentation/player.ts';
+import {
+ boardingStation,
+ hatchDirection,
+ spawnPlayer,
+ stepPlayer,
+ type WalkableWorld,
+} from '../src/presentation/player.ts';
+
+/** An empty world, for the walk and not for the walls. */
+const EMPTY_WORLD: WalkableWorld = { walls: [] };
 
 /** The plan every interior assertion is made against. */
 const PLAN: InteriorPlan = crashedShip();
@@ -96,6 +107,76 @@ describe('the state machine', () => {
   expect(runFrames(started, 1)).toBe(0n);
   expect(runFrames(started, 5)).toBe(0n);
   expect(started.state).toBe('paused');
+
+  // The frame-semantics twin of the delta clamp, with no engine in sight.
+  //
+  // Babylon's `getDeltaTime()` is a raw `performance.now()` gap, so an
+  // alt-tab away and back hands the frame loop one enormous delta — the 1.0 s
+  // below — that the interior walker would otherwise consume in one step.
+  // Bevy's answer is `Time<Virtual>::max_delta`: clamp the delta, never reset
+  // the clock, and let virtual time fall permanently behind. `main.ts` owns
+  // that clamp and this pins what the core must be true of it: a frame's `dt`
+  // is a parameter the exterior never spends as a step count, so a giant one
+  // buys the clock nothing here either.
+  const sim = Simulation.genesis(Seed.new(0n));
+  const driven = flow('exterior');
+  const frameSteps = (dt: number): bigint => {
+   let steps = 0n;
+   stepFrame(driven, { pressed: [], held: [], dt }, PLAN, NO_VIEWS, () => {
+    sim.advanceSingleStep();
+    steps += 1n;
+   });
+   return steps;
+  };
+
+  // Two ordinary frames at 60 Hz, then the alt-tab frame. It is four times the
+  // clamp, which is the whole reason the clamp exists.
+  expect(MAX_FRAME_SECONDS).toBe(0.25);
+  expect(1.0).toBeGreaterThan(MAX_FRAME_SECONDS);
+  expect(frameSteps(0.016)).toBe(1n);
+  expect(frameSteps(0.016)).toBe(1n);
+  expect(frameSteps(1.0)).toBe(1n);
+  const beforePause = sim.getStepsCompleted();
+
+  // The pause transition itself: the request frame takes no step, and
+  // `stepsCompleted` holds across it — the frozen clock is frozen, not skewed.
+  driven.requested = 'paused';
+  expect(frameSteps(0.016)).toBe(0n);
+  expect(sim.getStepsCompleted()).toBe(beforePause);
+  expect(driven.state).toBe('paused');
+  // Still frozen with a giant delta: `paused` spends nothing at any frame rate.
+  expect(frameSteps(1.0)).toBe(0n);
+  expect(sim.getStepsCompleted()).toBe(beforePause);
+
+  // And the frame the exterior resumes on is exactly one step, which is the
+  // whole cost the pause billed: the request frame's zero and the resumed
+  // frame's one.
+  driven.requested = 'exterior';
+  expect(frameSteps(0.016)).toBe(1n);
+  expect(sim.getStepsCompleted()).toBe(beforePause + 1n);
+
+  // The clamp's bite, at the consumer the clamp exists for. The same `1.0` s
+  // frame, handed to the walker raw against the clamped bound, moves the body
+  // further than a clamped frame ever could — which is the teleport the
+  // unclamped delta would cause, provable with no engine in sight.
+  const walking = { forward: true, back: false, left: false, right: false, sprint: false };
+  const atRest = spawnPlayer();
+  const clampedStep = stepPlayer(EMPTY_WORLD, atRest, walking, { x: 0, y: 0 }, MAX_FRAME_SECONDS);
+  const rawStep = stepPlayer(EMPTY_WORLD, atRest, walking, { x: 0, y: 0 }, 1.0);
+  const clampedDistance = Math.hypot(
+   clampedStep.position.x - atRest.position.x,
+   clampedStep.position.y - atRest.position.y,
+   clampedStep.position.z - atRest.position.z,
+  );
+  const rawDistance = Math.hypot(
+   rawStep.position.x - atRest.position.x,
+   rawStep.position.y - atRest.position.y,
+   rawStep.position.z - atRest.position.z,
+  );
+  // A clamped frame can never outrun the walk speed for as long as it takes.
+  expect(clampedDistance).toBeLessThanOrEqual(WALK_SPEED * MAX_FRAME_SECONDS);
+  // And the frame the clamp refuses is the one that would have.
+  expect(rawDistance).toBeGreaterThan(3 * clampedDistance);
  });
 
  it('only_in_game_advances_the_simulation', () => {

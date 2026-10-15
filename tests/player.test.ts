@@ -50,6 +50,7 @@ import {
  nearestReachableDistance,
 } from '../src/presentation/orbit.ts';
 import { OPENING_HULL_CONFIG } from '../src/presentation/frameMath.ts';
+import { InputTracker } from '../src/presentation/inputTypes.ts';
 
 /** Tolerance for the trigonometry round-trip through `atan2`/`sin_cos`. */
 const TOLERANCE = 1e-6;
@@ -334,5 +335,40 @@ describe('the interior walker', () => {
   expect(eye.y - PLAYER_SPAWN[1]).toBeCloseTo(0.65, 12);
   // And the feet stay on the deck: 1.9 m up a 2 m room.
   expect(PLAYER_SPAWN[1]).toBeCloseTo(0.9 + 0.1, 12);
+ });
+
+ it('releaseAll_forgets_keys_held_when_focus_left_the_window', () => {
+  // A browser fires no `keyup` for the keys held down when focus moves away,
+  // so those keys stay in `down`, in the pressed list and in the held set until
+  // something clears them — and the walker keeps walking when the player comes
+  // back with nothing held. Bevy's `KeyboardFocusLost` → `reset_all` is the
+  // answer this mirrors.
+  const tracker = new InputTracker();
+  tracker.press('KeyW');
+  tracker.press('KeyE');
+  tracker.release('KeyE');
+
+  const before = tracker.state();
+  expect(before.held).toContain('KeyW');
+  expect(before.pressedThisFrame).toContain('KeyW');
+
+  tracker.releaseAll();
+
+  const after = tracker.state();
+  // All three records are empty: nothing held, nothing mid-edge.
+  expect(after.held).toEqual([]);
+  expect(after.pressedThisFrame).toEqual([]);
+  expect(tracker.frame().pressed).toEqual([]);
+
+  // And the key that was held is reported as no longer held on the next frame,
+  // which is the assertion that fails if `releaseAll` clears nothing.
+  tracker.endFrame();
+  expect(tracker.state().held).toEqual([]);
+
+  // The tracker is still live afterwards: a fresh press after the blur edges
+  // and holds normally, so nothing is released a second time.
+  tracker.press('KeyW');
+  expect(tracker.state().held).toEqual(['KeyW']);
+  expect(tracker.state().pressedThisFrame).toEqual(['KeyW']);
  });
 });

@@ -50,6 +50,7 @@ import {
 } from './presentation/player.ts';
 import { EXTERIOR_AMBIENT, EXTERIOR_SUN, roomLights } from './presentation/lights.ts';
 import { InputTracker } from './presentation/inputTypes.ts';
+import { MAX_FRAME_SECONDS } from './presentation/constants.ts';
 import { buildExtras } from './presentation/extras.ts';
 import { exteriorFog, INTERIOR_MESHES_ARE_FOG_EXEMPT } from './presentation/fog.ts';
 import { HullPlan, meshHull, meshErrorMessage } from './ship/voxel.ts';
@@ -363,8 +364,29 @@ export function start(): Engine {
   presentation.held.delete(event.code);
  });
 
+ // A browser window fires no `keyup` for the keys held down when focus moves
+ // away, so the tracker and this file's own held set keep them forever and the
+ // walker keeps walking when the player comes back. Bevy's answer is
+ // `KeyboardFocusLost` → `release_all`; this is the same release, on the only
+ // pair of records that would remember. The DOM set is not the tracker's to
+ // clear, so it is cleared here beside it.
+ //
+ // The inverse is deliberately absent: a focus event does not *press* anything,
+ // because nothing was pressed on focus.
+ window.addEventListener('blur', () => {
+  presentation.input.releaseAll();
+  presentation.held.clear();
+ });
+
  engine.runRenderLoop(() => {
-  const dt = engine.getDeltaTime() / 1000;
+  // The frame's duration, clamped to Bevy's `Time<Virtual>::max_delta`. Babylon's
+  // `getDeltaTime()` is a raw `performance.now()` gap computed in `beginFrame`,
+  // so an alt-tab away and back hands this loop one enormous delta and the
+  // walker would consume the whole absence as one step of movement. Clamping at
+  // the seam — and only here — is what keeps `dt` the single measure of time in
+  // the core: it is a parameter everywhere downstream, and there is no second
+  // clock to disagree with this one.
+  const dt = Math.min(engine.getDeltaTime() / 1000, MAX_FRAME_SECONDS);
 
   // The frame: the game layer's own systems run, and only then does this file
   // read the state they arrived at. This is Bevy's order — `Update` runs the
