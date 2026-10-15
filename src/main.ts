@@ -21,10 +21,10 @@
  * be a second source of truth for time.
  */
 
-import { Color3, Color4, DirectionalLight, Engine, Mesh, MeshBuilder, PBRMaterial, PointLight, Scene, Vector3 } from 'babylonjs';
+import { Color3, DirectionalLight, Engine, Mesh, MeshBuilder, PBRMaterial, PointLight, Scene, Vector3 } from 'babylonjs';
 
 import { build } from './app.ts';
-import { createCameras, engineOptions, type CameraStack } from './presentation/cameraStack.ts';
+import { createExteriorCameras, createInteriorCameras, engineOptions } from './presentation/cameraStack.ts';
 import { uploadHullGeometry } from './presentation/hullUpload.ts';
 import { setHudText } from './presentation/hud.ts';
 import { OPENING_HULL_CONFIG } from './presentation/frameMath.ts';
@@ -119,10 +119,15 @@ function toLines(event: WheelEvent): number {
 /**
  * The scenes and everything the frame loop touches.
  *
- * Both cameras are shared by both scenes, because the camera stack is one stack:
- * the title camera draws the HUD and the DOM, and the two scene cameras draw
- * over it in order. What changes with the state is which camera is *active*, and
- * that is the game layer's flow, not a second scene.
+ * Two `Scene`s, not one. The Rust's three cameras share one Bevy render target
+ * and composite by `Camera::order`; Babylon cannot do that, because a camera
+ * renders only the scene it was constructed with. So the port splits them:
+ * the exterior scene holds the hull and the title camera that clears it, and the
+ * interior scene holds the rooms and the camera that clears it. Each clears to
+ * the same backdrop colour, which is the Rust's one `ClearColor` resource.
+ *
+ * What changes with the state is which scene this file renders, not which camera
+ * is active — the game layer's flow decides, and this file reads it.
  */
 interface Presentation {
  /** The orbit the exterior camera flies. */
@@ -203,7 +208,7 @@ export function start(): Engine {
 
  // The exterior scene and its hull.
  const exterior = new Scene(engine);
- const cameras: CameraStack = createCameras(exterior);
+ const exteriorCameras = createExteriorCameras(exterior);
  // The views are the seam the game layer reads to run its own decisions: which
  // cell the interior body is in, which way it faces, where the exterior orbit
  // camera stands and where the hatch's own boarding station is. They are built
@@ -267,10 +272,15 @@ export function start(): Engine {
  // The details: the canopy, the engine glows and the landing pads.
  buildExtras(exterior, HULL_PLAN, 'cryo');
 
- // The interior scene, and its rooms' own lamps.
+ // The interior scene, its own camera, and its rooms' own lamps.
+ //
+ // The interior camera belongs to *this* scene and to no other. It used to live
+ // in the exterior scene, where it could see none of these rooms — a Babylon
+ // camera renders the scene it was constructed with — and the interior scene had
+ // no camera at all, so `interior.render()` below threw before it drew anything.
  const interior = new Scene(engine);
+ const interiorCameras = createInteriorCameras(interior, exterior);
  interior.fogMode = Scene.FOGMODE_NONE;
- interior.clearColor = new Color4(0, 0, 0, 1);
  for (const light of roomLights(INTERIOR_PLAN)) {
   const lamp = new PointLight(`cryo.room.${light.room}`, Vector3.Zero(), interior);
   lamp.position.set(light.position[0], light.position[1], light.position[2]);
@@ -401,9 +411,9 @@ export function start(): Engine {
 
   if (state === 'exterior') {
    const at = orbitPosition(presentation.orbit);
-   cameras.exterior.position.set(at.x, at.y, at.z);
+   exteriorCameras.exterior.position.set(at.x, at.y, at.z);
    const target = presentation.orbit.target;
-   cameras.exterior.setTarget(new Vector3(target.x, target.y, target.z));
+   exteriorCameras.exterior.setTarget(new Vector3(target.x, target.y, target.z));
   } else if (state === 'interior') {
    // One frame of the walker: the pure function, with the held keys and the
    // look this file accumulated. `walk_player` and `frame_camera` are the Rust's
@@ -422,9 +432,9 @@ export function start(): Engine {
    }
 
    const eye = eyePosition(presentation.player.position);
-   cameras.interior.position.set(eye.x, eye.y, eye.z);
+   interiorCameras.interior.position.set(eye.x, eye.y, eye.z);
    const forward = lookDirection(presentation.yaw, presentation.pitch);
-   cameras.interior.setTarget(new Vector3(
+   interiorCameras.interior.setTarget(new Vector3(
     eye.x + forward.x,
     eye.y + forward.y,
     eye.z + forward.z,
@@ -437,8 +447,13 @@ export function start(): Engine {
 
   setHudText(app.hudText());
 
-  interior.render();
+  // The exterior first, the interior last. Each scene clears its own frame, so
+  // neither wipes the other's back buffer — there is one back buffer shared
+  // between two scenes, and the interior's clear overwrites it. The order is
+  // therefore not innocent: it is which screen the player ends up looking at
+  // when both are rendered, and the interior is the one that is on top.
   exterior.render();
+  interior.render();
  });
 
  window.addEventListener('resize', () => {
