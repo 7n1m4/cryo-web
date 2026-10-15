@@ -20,7 +20,7 @@
  * the clear on, measured on a faithful replica of this repo's structure.
  */
 
-import { Camera, Color4, NullEngine, Scene, type IColor4Like } from 'babylonjs';
+import { Camera, Color4, NullEngine, Scene, type IColor4Like } from '@babylonjs/core/pure.js';
 import { describe, expect, it } from 'vitest';
 
 import {

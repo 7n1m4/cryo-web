@@ -11,7 +11,7 @@
  * Babylon; the presentation layer is constructed here and never runs in a test.
  */
 
-import type { AbstractEngine, Scene } from 'babylonjs';
+import type { AbstractEngine, Scene } from '@babylonjs/core/pure.js';
 
 import { crashedShip } from './ship/interior.ts';
 import type { InteriorPlan } from './ship/interior.ts';
@@ -20,6 +20,7 @@ import type { ShipMesh } from './ship/voxel.ts';
 import { Seed, Simulation } from './sim/simulation.ts';
 import type { TransitionError } from './sim/simulation.ts';
 import type { InputState } from './presentation/inputTypes.ts';
+import { registerBabylon } from './presentation/babylon.ts';
 import { formatHudStatus, setHudText } from './presentation/hud.ts';
 import { InteriorProgress } from './game/interiorProgress.ts';
 import { stepFrame } from './game/step.ts';
@@ -106,6 +107,13 @@ export function build(
  initialState: InitialState = {},
  views: SceneViews = NO_VIEWS,
 ): CryoApp {
+ // The engine extensions are installed before anything builds a scene, and
+ // here rather than in `main.ts` because a headless `build` still constructs
+ // scenes and would otherwise run on an engine whose prototype methods are not
+ // attached yet. See `presentation/babylon.ts` for why that is the one call the
+ // `/pure` import path demands.
+ registerBabylon();
+
  const seed = initialState.seed ?? Seed.default().getValue();
  const simulation = Simulation.genesis(Seed.new(seed));
 

@@ -17,8 +17,8 @@
  *   error, caught here at the render boundary rather than in the generator.
  */
 
-import { VertexBuffer } from 'babylonjs';
-import type { Mesh } from 'babylonjs';
+import { VertexBuffer } from '@babylonjs/core/pure.js';
+import type { Mesh } from '@babylonjs/core/pure.js';
 
 import { VOXEL_SCALE } from './constants.ts';
 import type { ExtraMesh, ShipMesh } from '../ship/voxel.ts';

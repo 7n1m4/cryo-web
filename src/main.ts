@@ -21,7 +21,7 @@
  * be a second source of truth for time.
  */
 
-import { Color3, DirectionalLight, Engine, Mesh, MeshBuilder, PBRMaterial, PointLight, Scene, Vector3 } from 'babylonjs';
+import { Color3, DirectionalLight, Engine, Mesh, MeshBuilder, PBRMaterial, PointLight, Scene, Vector3 } from '@babylonjs/core/pure.js';
 
 import { build } from './app.ts';
 import { createExteriorCameras, createInteriorCameras, engineOptions } from './presentation/cameraStack.ts';

@@ -39,8 +39,8 @@
  * which camera is first in `activeCameras` — rather than pixels.
  */
 
-import { Color4, TargetCamera, Vector3 } from 'babylonjs';
-import type { AbstractEngine, Scene } from 'babylonjs';
+import { Color4, TargetCamera, Vector3 } from '@babylonjs/core/pure.js';
+import type { AbstractEngine, Scene } from '@babylonjs/core/pure.js';
 
 import {
  CAMERA_FAR_EXTERIOR,

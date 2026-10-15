@@ -12,7 +12,7 @@
  * applies them where it should.
  */
 
-import { NullEngine, PBRMaterial, Scene, type Material } from 'babylonjs';
+import { NullEngine, PBRMaterial, Scene, type Material } from '@babylonjs/core/pure.js';
 import { describe, expect, it } from 'vitest';
 
 import {

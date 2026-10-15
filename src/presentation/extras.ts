@@ -18,7 +18,7 @@
  * far more faces than the effect is worth.
  */
 
-import { MeshBuilder, PBRMaterial, type Mesh, type Scene } from 'babylonjs';
+import { MeshBuilder, PBRMaterial, type Mesh, type Scene } from '@babylonjs/core/pure.js';
 
 import type { ExtraMeshKind } from '../ship/voxel.ts';
 import { ExtraMeshKind as Kind } from '../ship/voxel.ts';

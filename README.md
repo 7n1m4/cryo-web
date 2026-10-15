@@ -6,11 +6,40 @@ Rust/Bevy implementation.
 ## Run it
 
 ```sh
-npm install       # one runtime dependency: babylonjs
-npm test          # 243 tests, 11 files, vitest
+npm install       # one runtime dependency: @babylonjs/core
+npm test          # 257 tests, 13 files, vitest
 npm run typecheck # tsc --noEmit, strict
 npm run dev       # the headless smoke harness
 ```
+
+### Why `@babylonjs/core` and not `babylonjs`
+
+The UMD `babylonjs` bundle is 7.9 MB and tree-shakes to nothing: every import
+pulls the whole of it in. The port imports from the `/pure` barrel of
+`@babylonjs/core` instead, which re-exports the same classes with the
+side-effectful registrations moved behind explicit `Register*()` calls.
+
+Measured with esbuild (`--bundle --format=esm --minify`) on a single entry point
+importing exactly the thirteen symbols this repo imports — these are
+measurements from this box, not claims reproduced by a test:
+
+| entry point | raw | gzip |
+|---|---|---|
+| `babylonjs@8.56.2` (UMD) | 7 877 845 B | 1 655 366 B |
+| `@babylonjs/core@9.31.0` (barrel) | 7 223 909 B | 1 597 816 B |
+| `@babylonjs/core@9.31.0/pure` | 1 878 539 B | 442 253 B |
+
+`/pure` is **3.5× smaller raw and 3.7× smaller compressed**. The plain
+`@babylonjs/core` barrel is no better than what it replaces, so the whole gain is
+in the `/pure` split rather than in the scoped-package rename. The one cost is
+that `RegisterStandardEngineExtensions()` must be called by hand; it is, once,
+from `app.ts`'s `build`, because a `nullEngine` works without it and a real
+`Engine` does not — a test suite on `nullEngine` would go green with the call
+missing. `tests/purePath.test.ts` covers that.
+
+`@types/babylonjs` is gone. It was dead weight: `tsconfig.json` sets
+`"types": ["node"]`, so the package's declarations were never loaded and the code
+was always typed by Babylon's own `.d.ts` files.
 
 ### Scripts the game needs (not yet in `package.json`)
 
@@ -95,12 +124,14 @@ Tests, per file, counted from the `vitest run` output:
 | `tests/frameMath.test.ts` | 12 |
 | `tests/sceneData.test.ts` | 13 |
 | `tests/extras.test.ts` | 3 |
+| `tests/cameraStack.test.ts` | 7 |
+| `tests/purePath.test.ts` | 6 |
 | `tests/dev.harness.ts` | 1 (assertion-free) |
-| **total** | **243** |
+| **total** | **257** |
 
 ## The presentation layer, honestly
 
-`src/presentation/` is written, not a stub. Thirteen modules, and none of them
+`src/presentation/` is written, not a stub. Fourteen modules, and none of them
 has produced a pixel: everything below is either pure arithmetic asserted with
 no renderer at all, or Babylon wiring asserted under Babylon's `NullEngine`,
 which is a null engine and not a canvas. `src/main.ts` is the only file that
@@ -115,7 +146,8 @@ builds a real `Engine`, and no test runs it.
 | `lights.ts` | both light sets, as data: `EXTERIOR_SUN`/`EXTERIOR_AMBIENT`, `BEACON_INTENSITY` 300 000, the per-room lamps (`roomLights`, `roomLightColor`, `roomLightRange`, `roomCentre`). Every light is shadow-free in both sets. | Does not create a Babylon light and does not touch the engine's ambient term; `main.ts` is where those become objects. |
 | `fog.ts` | the fog band from the hull's own length (1.5 to 6 hull lengths), `FOG_COLOR_LINEAR`, `GROUND_HALF_EXTENT` 400, and the interior's exemption from the exterior's fog — `INTERIOR_MESHES_ARE_FOG_EXEMPT` true, `INTERIOR_SEES_EXTERIOR_FOG` false. | Does not set `scene.fogMode` and does not create the ground plane the fog is tuned against. |
 | `extras.ts` | the Babylon wiring for the five non-voxel details: one box per detail, centred through the model transform, a `PBRMaterial` per detail, `alpha` on the glazing and an emissive term on the engine glow. | Does not prove appearance. `tests/extras.test.ts` asserts the wiring under `NullEngine`; no pixel has been produced. |
-| `cameraStack.ts` | `createCameras(scene)` builds three `TargetCamera`s with distinct `layerMask` bits (title 1, exterior 2, interior 4), per-camera near/far/fov from `CAMERA_STACK_CONTRACT`, sets `scene.autoClear = false` so the title camera clears and the rest composite, and **throws if two masks collide** — the Rust `single_mut` collision, made loud instead of silent. `engineOptions`/`engineMatchesContract` carry the Rust's MSAA-off and `PixelRatio(1)` contract. | Does not create the engine, does not render, and does not wire the fog. `engineMatchesContract` is asserted by nothing — it is a self-check waiting for a real `Engine` to check against. |
+| `cameraStack.ts` | `createExteriorCameras(scene)` builds the exterior scene's two cameras (title, exterior) with distinct `layerMask` bits (1, 2) and `createInteriorCameras(interiorScene, exteriorScene)` builds the interior's single camera (bit 4) into the interior scene. Per-camera near/far/fov from `CAMERA_STACK_CONTRACT`. **Both scenes clear**: `autoClear` with an explicit `clearColor` set to the Rust's one `ClearColor` (the fog colour), and the title camera first in `activeCameras` because Babylon clears on a scene's first active camera. Refuses a camera handed the wrong scene. | Does not create the engine, does not render, and does not wire the fog. `engineMatchesContract` is asserted by nothing — it is a self-check waiting for a real `Engine` to check against. |
+| `babylon.ts` | The `/pure` import path and the one registration it requires: `registerBabylon()` calls `RegisterStandardEngineExtensions()` from `@babylonjs/core/pure.js` and records that it did. Called once from `app.ts`'s `build`, so every entry point gets a registered engine. Carries the measured bundle-size numbers for the three candidate entry points. | Does not decide anything about the engine itself, and is not where the `Engine` is constructed — that is `main.ts`. The registration it performs is **not exercised by a GPU**: a `nullEngine` works without it, which is why `tests/purePath.test.ts` asserts the flag and the prototype methods rather than any rendered output. |
 | `hullUpload.ts` | flattens the mesher's positions/normals and 4-component colours into `Float32Array`s, converts indices to `Uint16Array`, refuses with the typed `TooManyVertices` error when they will not fit, and uploads via `setVerticesData`/`setIndices`. | Does not create the `Mesh` — the caller owns and disposes it — and does not build the extras, which are separate meshes. |
 | `hud.ts` | the DOM overlay: `formatHudStatus` renders `t{n} · {activity} · suit {n}%`, `setHudText` and `setTitleVisible` write to elements, all no-ops when there is no `document`. | Is **not** `babylonjs-gui`. Does not show the console readout: the game layer carries the readout state and nothing displays it. |
 | `title.ts` | the title screen's DOM: the start button beside the prompt, `pressStartButton`/`consumeStartClick` as a one-shot consumed edge, `mountTitle` (idempotent) and `setTitleVisible`. | Does not read or write the simulation. Every function is a no-op without a `document`, which is what keeps the game layer testable with no DOM. |
@@ -123,13 +155,22 @@ builds a real `Engine`, and no test runs it.
 | `input.ts` | `START_KEYS`, `frameWantsStart`, `walkFrame` — an `InputState` read into a walk frame. | Nothing imports it yet. The game layer owns its own start-key set (`src/game/transitions.ts`) and `main.ts` builds the walker's held keys itself. |
 
 `src/main.ts` is the one file that touches a canvas. It builds the `Engine`,
-composes the camera stack, uploads the hull, sets the exterior's fog and sun and
-ambient from the tables above, builds the extras, builds the interior's rooms
-and their lamps, wires the DOM listeners, and runs the render loop. It is
-deliberately **not tested**: it needs a canvas, and none of its work is verified
-by any test in this repo. What keeps it honest is that the arithmetic it calls —
-`orbitFromPlan`, `stepPlayer`, `orbitDragged`, `boardingStation` — is typed
-strictly and asserted against the Rust elsewhere.
+builds the two scenes and their cameras, uploads the hull, sets the exterior's
+fog and sun and ambient from the tables above, builds the extras, builds the
+interior's rooms and their lamps, wires the DOM listeners, and runs the render
+loop. It is deliberately **not tested**: it needs a canvas, and none of its work
+is verified by any test in this repo. What keeps it honest is that the arithmetic
+it calls — `orbitFromPlan`, `stepPlayer`, `orbitDragged`, `boardingStation` — is
+typed strictly and asserted against the Rust elsewhere, and that the camera
+configuration it passes to `createExteriorCameras`/`createInteriorCameras` is
+asserted directly in `tests/cameraStack.test.ts`.
+
+It renders the exterior first and the interior last, and the order is load-bearing
+rather than cosmetic: the two scenes share one back buffer and each clears it, so
+the second scene to render is the one the player ends up looking at when both are
+drawn. That is a two-scene consequence the Rust does not have — Bevy composites
+three cameras over one render target by `Camera::order` — and it is this file's
+job to keep straight.
 
 ## What is NOT ported yet
 
@@ -168,6 +209,11 @@ do.
 
 Smaller gaps, also verified:
 
+- `RegisterStandardEngineExtensions()` is called but its effect is **unverified**.
+  A `nullEngine` needs no registration, so the whole suite passes whether or not
+  the call is present, and `tests/purePath.test.ts` can only assert that the flag
+  flipped and the prototype methods are attached — never that a real `Engine`
+  draws. The first GPU run is what settles it.
 - No save file. The snapshot round-trip is exercised in memory only
   (`simulation.test.ts`); nothing reads or writes `localStorage` or a file.
 - `nearestConsoleInView`'s exact two-console equidistant tie is not tested. The
